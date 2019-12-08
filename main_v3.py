@@ -1,9 +1,8 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-import argparse
-import datetime
-
+# TensorFlow and tf.keras
 import tensorflow.compat.v1 as tf
+
 # Helper libraries
 import struct
 import numpy as np
@@ -18,22 +17,12 @@ print(tf.__version__)
 helper function
 """
 def log_gaussian(x, mu, sigma):
-    return -0.5 * np.log(2 * np.pi) - tf.log(tf.abs(sigma)) - (x - mu) ** 2 / (2 * sigma ** 2) + 1e-7
+    return -0.5 * np.log(2 * np.pi) - tf.log(tf.abs(sigma)) - (x - mu) ** 2 / (2 * sigma ** 2)
 
-def gaussian(x, mu, sigma):
-    return tf.exp(log_gaussian(x, mu, sigma)) + 1e-7
-
-def log_spike_and_slab_prior(x, sigma1, sigma2, pi):
-    #print(sigma1, sigma2, pi)
-    #return tf.log(gaussian(x, 0.0, 0.36)) 
-    return tf.log(pi * gaussian(x, 0.0, sigma1)+ (1-pi)*gaussian(x, 0.0, sigma2))
-
-def get_random(shape, avg, std):
-    return tf.random_normal(shape, mean=avg, stddev=std)
 
 # build determined W first
 class MnistClassification():
-    def __init__(self, input_size, hidden_size, learning_rate, net_struct, forward_only=True, batch_num=6):
+    def __init__(self, input_size, hidden_size, learning_rate, net_struct, forward_only=True):
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.learning_rate = learning_rate
@@ -41,7 +30,7 @@ class MnistClassification():
         self.forward_only = forward_only
         self.print_ops = []
         self.global_step = tf.Variable(0, trainable=False)
-        self.batch_num = batch_num
+
         # build
         self._build_placeholder()
         self._build_graph_and_get_loss()
@@ -51,6 +40,10 @@ class MnistClassification():
     def _build_placeholder(self):
         self.images = tf.placeholder(dtype=tf.float32, shape=(None, self.input_size), name="images")
         self.labels = tf.placeholder(dtype=tf.int32, shape=(None), name="labels")
+        if "random" in self.net_struct:
+            self.random_1 = tf.placeholder(dtype=tf.float32, shape=(self.input_size, self.hidden_size), name='r1')
+            self.random_2 = tf.placeholder(dtype=tf.float32, shape=(self.hidden_size, self.hidden_size), name='r2')
+            self.random_3 = tf.placeholder(dtype=tf.float32, shape=(self.hidden_size, 10), name='r3')
 
     def _build_graph_and_get_loss(self):
         # get variables
@@ -58,45 +51,31 @@ class MnistClassification():
             self.W1 = tf.Variable(tf.random_normal([self.input_size, self.hidden_size], stddev=0.35), name="W1")
             self.W2 = tf.Variable(tf.random_normal([self.hidden_size, self.hidden_size], stddev=0.35), name="W2")
             self.W3 = tf.Variable(tf.random_normal([self.hidden_size, 10], stddev=0.35), name="W3")
-            self.b1 = tf.Variable(tf.zeros([self.hidden_size]))
-            self.b2 = tf.Variable(tf.zeros([self.hidden_size]))
-            self.b3 = tf.Variable(tf.zeros([10]))
         else:
             self.mu_1 = tf.Variable(tf.random_normal([self.input_size, self.hidden_size], stddev=0.35), name="mu1")
             self.rho_1 = tf.Variable(tf.random_normal([self.input_size, self.hidden_size], stddev=0.35), name="rho1")
-            self.bmu_1 = tf.Variable(tf.zeros([self.hidden_size]))
-            self.brho_1 = tf.Variable(tf.zeros([self.hidden_size]))
 
             self.mu_2 = tf.Variable(tf.random_normal([self.hidden_size, self.hidden_size], stddev=0.35), name="mu_2")
             self.rho_2 = tf.Variable(tf.random_normal([self.hidden_size, self.hidden_size], stddev=0.35), name="rho_2")
-            self.bmu_2 = tf.Variable(tf.zeros([self.hidden_size]))
-            self.brho_2 = tf.Variable(tf.zeros([self.hidden_size]))
 
             self.mu_3 = tf.Variable(tf.random_normal([self.hidden_size, 10], stddev=0.35), name="mu_3")
             self.rho_3 = tf.Variable(tf.random_normal([self.hidden_size, 10], stddev=0.35), name="rho_3")
-            self.bmu_3 = tf.Variable(tf.zeros([10]))
-            self.brho_3 = tf.Variable(tf.zeros([10]))
 
             # build graph
-            self.W1 = self.mu_1 + get_random((self.input_size, self.hidden_size),0.,.01) * tf.math.sqrt(tf.math.log(1 + tf.math.exp(self.rho_1)))
-            self.b1 = self.bmu_1 + get_random((self.hidden_size,),0.,.01) * tf.math.sqrt(tf.math.log(1 + tf.math.exp(self.brho_1)))
-
-            self.W2 = self.mu_2 + get_random((self.hidden_size, self.hidden_size),0.,.01) * tf.math.sqrt(tf.math.log(1 + tf.math.exp(self.rho_2)))
-            self.b2 = self.bmu_2 + get_random((self.hidden_size,),0., .01) * tf.math.sqrt(tf.math.log(1 + tf.math.exp(self.brho_2)))
-
-            self.W3 = self.mu_3 + get_random((self.hidden_size, 10),0.,.01) * tf.math.sqrt(tf.math.log(1 + tf.math.exp(self.rho_3)))
-            self.b3 = self.bmu_3 + get_random((10,),0., .01) * tf.math.sqrt(tf.math.log(1 + tf.math.exp(self.brho_3)))
+            self.W1 = self.mu_1 + self.random_1 * tf.math.sqrt(tf.math.log(1 + tf.math.exp(self.rho_1)))
+            self.W2 = self.mu_2 + self.random_2 * tf.math.sqrt(tf.math.log(1 + tf.math.exp(self.rho_2)))
+            self.W3 = self.mu_3 + self.random_3 * tf.math.sqrt(tf.math.log(1 + tf.math.exp(self.rho_3)))
 
         self.tmp = None
         self.y = None
         # build graph
-        self.tmp = tf.matmul(self.images, self.W1) + self.b1
+        self.tmp = tf.matmul(self.images, self.W1)
         self.tmp = tf.nn.relu(self.tmp, name="relu1")
 
-        self.tmp = tf.matmul(self.tmp, self.W2) + self.b2
+        self.tmp = tf.matmul(self.tmp, self.W2)
         self.tmp = tf.nn.relu(self.tmp, name="relu2")
 
-        self.y = tf.matmul(self.tmp, self.W3) + self.b3
+        self.y = tf.matmul(self.tmp, self.W3)
         self.y = tf.nn.softmax(self.y, axis=1) + 1e-7
 
         # create one hot encoding for labels
@@ -108,33 +87,15 @@ class MnistClassification():
         self.loss = tf.reduce_sum(-tf.math.log(self.y) * self.one_hot_labels)
         if "random"  in self.net_struct:
             log_pw, log_qw = 0.0, 0.0
-            if "spik_and_slab" not in self.net_struct:
-                print("run standard prior!!!")
-                log_pw += tf.reduce_sum(log_gaussian(self.W1, 0.0, 1.0))
-                log_pw += tf.reduce_sum(log_gaussian(self.b1, 0.0, 1.0))
-                log_pw += tf.reduce_sum(log_gaussian(self.W2, 0.0, 1.0))
-                log_pw += tf.reduce_sum(log_gaussian(self.b2, 0.0, 1.0))
-                log_pw += tf.reduce_sum(log_gaussian(self.W3, 0.0, 1.0))
-                log_pw += tf.reduce_sum(log_gaussian(self.b3, 0.0, 1.0))
-            else:
-                print("run spik!!!")
-                #self.print_ops.append(tf.print("simga 1", 1/tf.exp(1.0)))
-                log_pw += tf.reduce_sum(log_spike_and_slab_prior(self.W1, 1.0/tf.exp(1.0), 1.0/tf.exp(6.0), 0.25))
-                log_pw += tf.reduce_sum(log_spike_and_slab_prior(self.b1, 1/tf.exp(1.0), 1.0/tf.exp(6.0), 0.25))
-                log_pw += tf.reduce_sum(log_spike_and_slab_prior(self.W2, 1.0/tf.exp(1.0), 1.0/tf.exp(6.0), 0.25))
-                log_pw += tf.reduce_sum(log_spike_and_slab_prior(self.b2, 1.0/tf.exp(1.0), 1.0/tf.exp(6.0), 0.25))
-                log_pw += tf.reduce_sum(log_spike_and_slab_prior(self.W3, 1.0/tf.exp(1.0), 1.0/tf.exp(6.0), 0.25))
-                log_pw += tf.reduce_sum(log_spike_and_slab_prior(self.b3, 1.0/tf.exp(1.0), 1.0/tf.exp(6.0), 0.25))
 
+            log_pw += tf.reduce_sum(log_gaussian(self.W1, 0.0, 1.0))
             log_qw += tf.reduce_sum(log_gaussian(self.W1, self.mu_1, tf.math.sqrt(tf.math.log(1 + tf.math.exp(self.rho_1)))))
-            log_qw += tf.reduce_sum(log_gaussian(self.b1, self.bmu_1, tf.math.sqrt(tf.math.log(1 + tf.math.exp(self.brho_1)))))
+            log_pw += tf.reduce_sum(log_gaussian(self.W2, 0.0, 1.0))
             log_qw += tf.reduce_sum(log_gaussian(self.W2, self.mu_2, tf.math.sqrt(tf.math.log(1 + tf.math.exp(self.rho_2)))))
-            log_qw += tf.reduce_sum(log_gaussian(self.b2, self.bmu_2, tf.math.sqrt(tf.math.log(1 + tf.math.exp(self.brho_2)))))
+            log_pw += tf.reduce_sum(log_gaussian(self.W3, 0.0, 1.0))
             log_qw += tf.reduce_sum(log_gaussian(self.W3, self.mu_3, tf.math.sqrt(tf.math.log(1 + tf.math.exp(self.rho_3)))))
-            log_qw += tf.reduce_sum(log_gaussian(self.b3, self.bmu_3, tf.math.sqrt(tf.math.log(1 + tf.math.exp(self.brho_3)))))
-            print(self.batch_num, "!!!!!!!!")
             #self.print_ops.append(tf.print("prior loss: ", log_qw-log_pw))
-            #self.loss += (log_qw - log_pw) / self.batch_num
+            self.loss += (log_qw - log_pw)/ 6.0
         #self.print_ops.append(tf.print("mask: ", -tf.math.log(self.y) * self.one_hot_labels))
         #self.print_ops.append(tf.print("the step loss: ", self.loss))
 
@@ -206,11 +167,21 @@ class Dataset():
             input_feed[self.model.images.name] = self.images[self.cur_idx: self.images.shape[0]]
             input_feed[self.model.labels.name] = self.labels[self.cur_idx: self.images.shape[0]]
 
+            if "random" in self.model.net_struct:
+                input_feed[self.model.random_1.name] = np.random.normal(size=(self.model.input_size, self.model.hidden_size))
+                input_feed[self.model.random_2.name] = np.random.normal(size=(self.model.hidden_size, self.model.hidden_size))
+                input_feed[self.model.random_3.name] = np.random.normal(size=(self.model.hidden_size, 10))
+
             return input_feed, has_next
         else:
             has_next = True
             input_feed[self.model.images.name] = self.images[self.cur_idx: self.cur_idx+self.batch_size]
             input_feed[self.model.labels.name] = self.labels[self.cur_idx: self.cur_idx+self.batch_size]
+
+            if "random" in self.model.net_struct:
+                input_feed[self.model.random_1.name] = np.random.normal(size=(self.model.input_size, self.model.hidden_size))
+                input_feed[self.model.random_2.name] = np.random.normal(size=(self.model.hidden_size, self.model.hidden_size))
+                input_feed[self.model.random_3.name] = np.random.normal(size=(self.model.hidden_size, 10))
 
             self.cur_idx += self.batch_size
             return input_feed, has_next
@@ -222,74 +193,64 @@ class Dataset():
         input_feed[self.model.images.name] = self.images[0: self.images.shape[0]]
         input_feed[self.model.labels.name] = self.labels[0: self.images.shape[0]]
 
+        if "random" in self.model.net_struct:
+            input_feed[self.model.random_1.name] = np.random.normal(size=(self.model.input_size, self.model.hidden_size))
+            input_feed[self.model.random_2.name] = np.random.normal(size=(self.model.hidden_size, self.model.hidden_size))
+            input_feed[self.model.random_3.name] = np.random.normal(size=(self.model.hidden_size, 10))
+
         return input_feed
 
-def train(args):
-
+def train():
     # place for all hyperparamters and settings
+    image_path = "train-images-idx3-ubyte"
+    label_path = "train-labels-idx1-ubyte"
     ckpt_file = ""
     epochs = 1000
     learning_rate = 1e-3
     batch_size = 1000
     input_size = 28*28
     hidden_size = 200
-    num_batch = 60000 / float(batch_size) 
-    output = ""
 
 
 
-    # tune
-    for hidden_size in [400, 800, 1200]:
-        for learning_rate in [1e-3]:
-            config = tf.ConfigProto()
-            config.gpu_options.allow_growth = True
-            with tf.Session(config=config) as sess:
-                # train file
-                image_path = "train-images-idx3-ubyte"
-                label_path = "train-labels-idx1-ubyte"
-                model = MnistClassification(input_size, hidden_size, learning_rate, net_struct=args.net_struct, forward_only=False, batch_num=num_batch)
-                dataset = Dataset(model, image_path, label_path, batch_size)
-                init_op = tf.initialize_all_variables()
-                sess.run(init_op)
-                for i in range(epochs):
-                    print("In epoch: ", i)
-                    has_next = True
-                    idx = 0
 
-                    dataset.initilize_epoch()
-                    while has_next:
-                        idx+=1
+    config = tf.ConfigProto()
+    config.gpu_options.allow_growth = True
 
-                        input_feed, has_next = dataset.get_train_batch()
-                        #print(input_feed.keys())
+    with tf.Session(config=config) as sess:
+        model = MnistClassification(input_size, hidden_size, learning_rate, net_struct="random_factor", forward_only=False)
+        dataset = Dataset(model, image_path, label_path, batch_size)
+        init_op = tf.initialize_all_variables()
+        sess.run(init_op)
+        for i in range(epochs):
+            print("In epoch: ", i)
+            has_next = True
+            idx = 0
 
-                        loss, accu = model.step(sess, input_feed, forward_only=False)
+            dataset.initilize_epoch()
+            while has_next:
+                idx+=1
 
-                        if idx % 10 == 0:
-                            print("loss: %.3f\t accuracy: %.3f "%(loss/batch_size, accu))
+                input_feed, has_next = dataset.get_train_batch()
+                #print(input_feed.keys())
+
+                loss, accu = model.step(sess, input_feed, forward_only=False)
+
+                if idx % 10 == 0:
+                    print("loss: %.3f\t accuracy: %.3f "%(loss/batch_size, accu))
 
         #ckpt_path = "./" + "mnist_det_weight.ckpt"
         #model.saver.save(sess, ckpt_path, global_step=model.global_step)
 
 
-                # test file
-                image_path = "t10k-images-idx3-ubyte"
-                label_path = "t10k-labels-idx1-ubyte"
-                dataset = Dataset(model, image_path, label_path, batch_size)
-                input_feed = dataset.get_test_batch()
-                accu = model.step(sess, input_feed, forward_only=True)
-                print("accuracy: ", accu)
-                output += str(hidden_size) + "_" + str(learning_rate) + "_" + str(args.net_struct) + "_" + str(num_batch)+ "\t accu:" + str(accu) + '\n'
-                print(output)
-                output += ""
-    with open("record.txt"+str(datetime.datetime.now()), 'w') as fout:
-        fout.write(output)
+        # test file
+        image_path = "t10k-images-idx3-ubyte"
+        label_path = "t10k-labels-idx1-ubyte"
+        dataset = Dataset(model, image_path, label_path, batch_size)
+        input_feed = dataset.get_test_batch()
+        accu = model.step(sess, input_feed, forward_only=True)
+        print("accuracy: ", accu)
 
-def _parse_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--net_struct")
-    return parser.parse_args() 
 
 if __name__ == "__main__":
-    args = _parse_args()
-    train(args)
+    train()

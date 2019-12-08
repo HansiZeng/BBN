@@ -8,7 +8,7 @@ def KL_divergence_between_normal(mu1, sigma1, mu2, sigma2):
     Assume tf.tensor do element-wise operation as expected
     """
     return tf.reduce_sum(tf.log(tf.math.truediv(sigma2, sigma1)) + \
-            tf.math.truediv(sigma1*sigma1 + (mu1-mu2), 2*sigma2*sigma2) - \
+            tf.math.truediv(sigma1*sigma1 + (mu1-mu2)*(mu1-mu2), 2*sigma2*sigma2) - \
             0.5)
 
 
